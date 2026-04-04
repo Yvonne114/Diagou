@@ -1,0 +1,18 @@
+# OS files
+.DS_Store
+
+# Frontend (Vue)
+**/node_modules/
+**/dist/
+**/.env.local
+
+# Backend (Spring Boot / Maven)
+**/target/
+**/.mvn/
+**/.idea/
+**/.vscode/
+**/bin/
+*.class
+
+# Logs
+*.log
