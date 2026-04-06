@@ -43,8 +43,7 @@ CREATE TYPE commission_status AS ENUM (
 );
 
 CREATE TYPE cancel_stage AS ENUM (
-  'BEFORE_CONFIRMED',   -- 審核前取消 → 全額退款
-  'BEFORE_PAID',        -- 確認後付款前取消 → 全額退款
+  'BEFORE_PAID',        -- 付款前取消（含審核前）→ 全額退款
   'BEFORE_PURCHASING',  -- 付款後購買前取消 → 退款扣手續費
   'AFTER_PURCHASING'    -- 購買後取消 → 無法退款，個案處理
 );
@@ -130,22 +129,18 @@ CREATE TYPE fee_config_key      AS ENUM (
 
 ```sql
 CREATE TABLE users (
-  id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-  email              VARCHAR(255) NOT NULL UNIQUE,
-  password_hash      VARCHAR(255) NOT NULL,
-  phone              VARCHAR(20),
-  full_name          VARCHAR(100) NOT NULL,
-  display_name       VARCHAR(50),
-  avatar_url         TEXT,
-  role               user_role    NOT NULL DEFAULT 'BUYER',
-  status             user_status  NOT NULL DEFAULT 'ACTIVE',
-  preferred_language VARCHAR(10)  DEFAULT 'zh-TW',
-  timezone           VARCHAR(50)  DEFAULT 'Asia/Taipei',
-  buyer_note         TEXT,                        -- 固定給 Staff 看的備註
-  deleted_at         TIMESTAMPTZ,                 -- 軟刪除
-  created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  last_login_at      TIMESTAMPTZ
+  id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  phone         VARCHAR(20),
+  full_name     VARCHAR(100) NOT NULL,
+  display_name  VARCHAR(50),
+  role          user_role    NOT NULL DEFAULT 'BUYER',
+  status        user_status  NOT NULL DEFAULT 'ACTIVE',
+  deleted_at    TIMESTAMPTZ,                 -- 軟刪除
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
 );
 ```
 
@@ -167,13 +162,11 @@ CREATE TABLE addresses (
   label           VARCHAR(50),                   -- 「家」「公司」
   recipient_name  VARCHAR(100) NOT NULL,
   phone           VARCHAR(20)  NOT NULL,
-  postal_code     VARCHAR(10)  NOT NULL,
-  city            VARCHAR(50)  NOT NULL,
-  district        VARCHAR(50)  NOT NULL,
-  address_line1   VARCHAR(200) NOT NULL,
-  address_line2   VARCHAR(200),
-  country_code    CHAR(2)      NOT NULL DEFAULT 'TW',
-  is_default      BOOLEAN      NOT NULL DEFAULT FALSE,
+  postal_code   VARCHAR(10)  NOT NULL,
+  city          VARCHAR(50)  NOT NULL,            -- 縣市
+  district      VARCHAR(50)  NOT NULL,            -- 區
+  address_line  VARCHAR(200) NOT NULL,            -- 街道地址（含樓層）
+  is_default    BOOLEAN      NOT NULL DEFAULT FALSE,
   is_deleted      BOOLEAN      NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -182,7 +175,7 @@ CREATE TABLE addresses (
 
 **設計理由：**
 - 獨立表：Buyer 可存多個地址，有列表、設預設、刪除等操作
-- `is_deleted` 軟刪除：commission 的 `shipping_address_id` FK 不能壞
+- `is_deleted` 軟刪除：shipment 的 `shipping_address_id` FK 不能壞
 
 ---
 
@@ -191,7 +184,6 @@ CREATE TABLE addresses (
 ```sql
 CREATE TABLE commissions (
   id                    UUID               PRIMARY KEY DEFAULT gen_random_uuid(),
-  commission_number     VARCHAR(20)        NOT NULL UNIQUE,  -- CO-YYYYMMDD-序號
 
   buyer_id              UUID               NOT NULL REFERENCES users(id),
   assigned_staff_id     UUID               REFERENCES users(id),
@@ -199,10 +191,6 @@ CREATE TABLE commissions (
   status                commission_status  NOT NULL DEFAULT 'PENDING',
   cancel_stage          cancel_stage,
 
-  -- 地址（FK，地址一旦被委託使用後不允許修改，只能新增或刪除）
-  shipping_address_id   UUID           REFERENCES addresses(id),
-
-  shipping_method       shipping_method    NOT NULL DEFAULT 'AIR_STANDARD',
   requires_inspection   BOOLEAN            NOT NULL DEFAULT FALSE,
 
   buyer_note            TEXT,
@@ -216,7 +204,6 @@ CREATE TABLE commissions (
   -- 取消
   cancel_reason         TEXT,
   cancelled_at          TIMESTAMPTZ,
-  cancel_requested_by   UUID               REFERENCES users(id),
 
   -- 費用（PREPAY 段，委託確認時寫入）
   items_cost_jpy        NUMERIC(10,2),    -- 商品費（日圓）
@@ -224,13 +211,7 @@ CREATE TABLE commissions (
   jpy_to_twd_rate       NUMERIC(8,4),     -- 確認時匯率
   service_fee_twd       NUMERIC(10,2),    -- 服務費
   inspection_fee_twd    NUMERIC(10,2),    -- 加值服務費小計
-  domestic_shipping_twd NUMERIC(10,2),    -- 日本境內運費
   prepay_total_twd      NUMERIC(10,2),    -- 預付總額
-
-  -- 費用（FINAL 段，出貨打包後寫入）
-  intl_shipping_twd     NUMERIC(10,2),    -- 實際國際運費
-  customs_twd           NUMERIC(10,2),    -- 關稅估算
-  final_total_twd       NUMERIC(10,2),    -- 尾款總額
 
   -- 各階段時間戳
   submitted_at          TIMESTAMPTZ        NOT NULL DEFAULT NOW(),
@@ -246,7 +227,7 @@ CREATE TABLE commissions (
 
 **設計理由：**
 - 委託單 = 訂單：一張單走完整流程，避免兩表同步問題
-- `shipping_address_id` 只存 FK：地址一旦被委託使用即不允許修改，用應用層控制
+- 地址和運送方式不放在委託單：委託單只管「買什麼」，地址和運送方式是出貨時才需要，放在 `shipments` 表
 - `cancel_stage`：取消後 status 變 CANCELLED，需獨立欄位記錄「當時在哪個階段」，決定退款政策
 - 費用拆成獨立欄位：比 JSONB 更直覺，查詢和 debug 更方便
 - 費用分兩段：PREPAY（確認時填）、FINAL（出貨後填），對應兩次付款時機
@@ -262,24 +243,15 @@ CREATE TABLE commission_items (
   commission_id           UUID      NOT NULL REFERENCES commissions(id) ON DELETE CASCADE,
 
   product_url             TEXT      NOT NULL,
-  product_name            TEXT      NOT NULL,
-  product_name_ja         TEXT,
+  product_name_ja         TEXT,             -- 日文商品名稱，從搜尋結果或爬蟲帶入
   product_image_url       TEXT,
   specifications          JSONB     NOT NULL DEFAULT '{}',  -- {"color":"紅","size":"M"}
   quantity                SMALLINT  NOT NULL DEFAULT 1 CHECK (quantity > 0),
 
-  unit_price_budget_jpy   NUMERIC(10,2),   -- Buyer 填的預算上限
   unit_price_actual_jpy   NUMERIC(10,2),   -- Staff 實際購買價
-
-  weight_estimate_g       INT,             -- 估算重量
   weight_actual_g         INT,             -- Staff 量測的實際重量
 
   item_note               TEXT,
-  is_purchased            BOOLEAN   NOT NULL DEFAULT FALSE,
-  purchased_at            TIMESTAMPTZ,
-  purchase_receipt_url    TEXT,
-  is_shipped              BOOLEAN   NOT NULL DEFAULT FALSE,
-  sort_order              SMALLINT  NOT NULL DEFAULT 0,
 
   created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -288,9 +260,9 @@ CREATE TABLE commission_items (
 
 **設計理由：**
 - `specifications` 用 JSONB：不同平台商品規格維度不同，無法用固定欄位覆蓋
-- 雙價格欄位：`budget_jpy` 供 Staff 超額警示，`actual_jpy` 用於費用計算與對帳
-- 雙重量欄位：`estimate_g` 供下單時費用試算，`actual_g` 是 FINAL 付款計費依據
-- `is_shipped`：快速判斷此商品是否已進出貨單，避免 JOIN
+- `unit_price_actual_jpy`：Staff 實際購買後填入，用於費用計算與對帳
+- `weight_actual_g`：Staff 打包時量測，是 FINAL 運費計費依據
+- 採購和出貨狀態不在 item 層追蹤，跟著 commission status 走即可
 
 ---
 
@@ -326,8 +298,6 @@ CREATE TABLE commission_services (
 ```sql
 CREATE TABLE shipments (
   id                         UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
-  shipment_number            VARCHAR(20)      NOT NULL UNIQUE,  -- SH-YYYYMMDD-序號
-
   buyer_id                   UUID             NOT NULL REFERENCES users(id),
   created_by_staff_id        UUID             NOT NULL REFERENCES users(id),
   shipping_address_id        UUID             NOT NULL REFERENCES addresses(id),
@@ -335,18 +305,15 @@ CREATE TABLE shipments (
   status                     shipment_status  NOT NULL DEFAULT 'PREPARING',
   shipping_method            shipping_method  NOT NULL DEFAULT 'AIR_STANDARD',
 
-  total_weight_g             INT,
-  intl_shipping_actual_twd   NUMERIC(10,2),
-  intl_shipping_estimate_twd NUMERIC(10,2),
+  total_weight_g        INT,
+  domestic_shipping_twd NUMERIC(10,2),    -- 日本境內運費
+  intl_shipping_twd     NUMERIC(10,2),    -- 實際國際運費
+  customs_twd           NUMERIC(10,2),    -- 關稅估算
+  final_total_twd       NUMERIC(10,2),    -- 尾款總額
 
   tracking_number            VARCHAR(100),
   carrier                    VARCHAR(50),
-  tracking_url               TEXT,
 
-  package_image_urls         JSONB            DEFAULT '[]',
-  staff_note                 TEXT,
-
-  packed_at                  TIMESTAMPTZ,
   shipped_at                 TIMESTAMPTZ,
   delivered_at               TIMESTAMPTZ,
   estimated_delivery_at      DATE,
@@ -371,7 +338,6 @@ CREATE TABLE shipment_items (
   shipment_id           UUID    NOT NULL REFERENCES shipments(id) ON DELETE CASCADE,
   commission_item_id    UUID    NOT NULL REFERENCES commission_items(id),
   commission_id         UUID    NOT NULL REFERENCES commissions(id),  -- 冗餘
-  item_weight_g         INT,
   allocated_shipping_twd NUMERIC(10,2),
 
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -392,7 +358,7 @@ CREATE TABLE shipment_items (
 ```sql
 CREATE TABLE payments (
   id                     UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-  payment_number         VARCHAR(20)     NOT NULL UNIQUE,  -- PAY-YYYYMMDD-序號
+  payment_number         VARCHAR(20)     NOT NULL UNIQUE,  -- ECPay MerchantTradeNo 用，格式：P + 13位時間戳（共14字元）
 
   commission_id          UUID            REFERENCES commissions(id),   -- PREPAY
   shipment_id            UUID            REFERENCES shipments(id),     -- FINAL
@@ -434,7 +400,7 @@ CREATE TABLE payments (
   ```json
   { "bank_code": "005", "v_account": "9381234567890", "expire_date": "2026/04/10" }
   ```
-- `payment_number` 直接當 ECPay 的 `MerchantTradeNo` 使用（格式 PAY-YYYYMMDD-序號，≤20字元符合規範）
+- `payment_number` 直接當 ECPay 的 `MerchantTradeNo` 使用，UUID 超過 20 字元限制故獨立產生，格式：`P` + 13 位 epoch 毫秒，共 14 字元
 - `gateway_transaction_id` 存 ECPay 回傳的 `TradeNo`
 - `checkMacValue` 和 `formData` 不存 DB，每次付款時重新產生
 - `UNIQUE (commission_id, payment_type)`：防止同一委託的預付被重複建立
@@ -504,26 +470,15 @@ CREATE TABLE messages (
 
 ```sql
 CREATE TABLE fee_configs (
-  id            UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-  config_key    fee_config_key  NOT NULL,
-  numeric_value NUMERIC(10,4),
-  text_value    TEXT,
-  display_name  VARCHAR(100)    NOT NULL,
-  description   TEXT,
-  unit          VARCHAR(20),               -- '%', 'TWD', 'TWD/kg'
-  is_active     BOOLEAN         NOT NULL DEFAULT TRUE,
-  version       INT             NOT NULL DEFAULT 1,
-  valid_from    TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-  valid_until   TIMESTAMPTZ,               -- NULL = 目前有效
-  created_by    UUID            REFERENCES users(id),
-  created_at    TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+  config_key  fee_config_key  PRIMARY KEY,
+  value       NUMERIC(10,4)   NOT NULL,
+  updated_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
 ```
 
 **設計理由：**
-- `valid_from` / `valid_until` 版本控制：每次修改費率建新紀錄 + 關舊紀錄，保留完整歷史
-- 查詢有效費率：`WHERE valid_until IS NULL AND is_active = TRUE`
-- 這樣可回答「三個月前這筆委託適用的費率是多少」
+- `config_key` 直接當 PK，一個 key 只有一筆，改費率直接 UPDATE
+- 作品集不需要費率歷史版本控制，簡化設計
 
 ---
 
@@ -582,8 +537,7 @@ CREATE TABLE banners (
 
 ── 取消路徑 ──────────────────────────────────
 任何階段 → CANCELLED，cancel_stage 記錄時間點：
-  BEFORE_CONFIRMED  → 全額退款
-  BEFORE_PAID       → 全額退款
+  BEFORE_PAID       → 全額退款（付款前，含審核前）
   BEFORE_PURCHASING → 退款扣手續費
   AFTER_PURCHASING  → 無法退款，個案處理
 ```
@@ -625,11 +579,6 @@ CREATE INDEX idx_commissions_waiting
 CREATE INDEX idx_notifications_unread
   ON notifications(user_id, created_at DESC)
   WHERE is_read = FALSE;
-
--- fee_configs（查有效費率）
-CREATE INDEX idx_fee_configs_active
-  ON fee_configs(config_key)
-  WHERE valid_until IS NULL AND is_active = TRUE;
 
 -- shipment_items（防重複）
 -- UNIQUE (shipment_id, commission_item_id) 已自動建立索引
@@ -689,7 +638,7 @@ Spring Boot 實作：
 | **DB 層最後防線** | UNIQUE、CHECK constraint 在應用層之外再擋一道 |
 | **軟刪除** | users、addresses 不硬刪，保留歷史關聯 |
 | **JSONB 用在彈性結構** | 商品規格、金流回傳、ATM 資訊等結構不固定的資料 |
-| **版本控制** | fee_configs 每次修改建新紀錄，保留完整費率歷史 |
+| **費率直接 UPDATE** | fee_configs 一個 key 一筆，改費率直接覆蓋，作品集不需要歷史版本 |
 
 ---
 
