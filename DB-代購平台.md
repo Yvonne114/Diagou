@@ -119,27 +119,29 @@ CREATE TYPE fee_config_key      AS ENUM (
 
 ```sql
 CREATE TABLE users (
-  id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-  email             VARCHAR(255) NOT NULL UNIQUE,
-  phone             VARCHAR(20),
-  full_name         VARCHAR(100) NOT NULL,
-  display_name      VARCHAR(50),
-  avatar_url        TEXT,
-  role              user_role    NOT NULL DEFAULT 'BUYER',
-  status            user_status  NOT NULL DEFAULT 'ACTIVE',
-  auth_uid          UUID         UNIQUE,        -- 對應 Supabase auth.users，RLS 用
-  preferred_language VARCHAR(10) DEFAULT 'zh-TW',
-  timezone          VARCHAR(50)  DEFAULT 'Asia/Taipei',
-  buyer_note        TEXT,                        -- 固定給 Staff 看的備註
-  deleted_at        TIMESTAMPTZ,                 -- 軟刪除
-  created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  last_login_at     TIMESTAMPTZ
+  id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  email              VARCHAR(255) NOT NULL UNIQUE,
+  password_hash      VARCHAR(255) NOT NULL,
+  phone              VARCHAR(20),
+  full_name          VARCHAR(100) NOT NULL,
+  display_name       VARCHAR(50),
+  avatar_url         TEXT,
+  role               user_role    NOT NULL DEFAULT 'BUYER',
+  status             user_status  NOT NULL DEFAULT 'ACTIVE',
+  preferred_language VARCHAR(10)  DEFAULT 'zh-TW',
+  timezone           VARCHAR(50)  DEFAULT 'Asia/Taipei',
+  buyer_note         TEXT,                        -- 固定給 Staff 看的備註
+  deleted_at         TIMESTAMPTZ,                 -- 軟刪除
+  created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  last_login_at      TIMESTAMPTZ
 );
 ```
 
 **設計理由：**
-- `auth_uid`：Supabase 認證與業務資料分離，透過此欄橋接
+- `password_hash`：Spring Boot 自管 JWT，由後端驗證帳密後自行簽發 token
+- JWT payload 帶 `user_id` + `role`，後端每支 API 從 token 取得身份，自行做存取控制
+- Supabase 僅作為 PostgreSQL 使用，不用 Supabase Auth，故不需要 `auth_uid`
 - `deleted_at` 軟刪除：帳號刪除後歷史委託仍需保留，FK 不能壞
 - `role` 單一欄位：角色互斥，不用多個 boolean flag
 
@@ -603,7 +605,7 @@ COMPLETED → REFUNDED / PARTIALLY_REFUNDED
 
 ```sql
 -- users
-CREATE INDEX idx_users_auth_uid ON users(auth_uid);  -- Supabase RLS 必備
+CREATE INDEX idx_users_email ON users(email);  -- 登入查詢
 
 -- commissions（查詢最頻繁）
 CREATE INDEX idx_commissions_buyer_status
