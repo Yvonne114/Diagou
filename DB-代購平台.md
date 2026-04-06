@@ -15,9 +15,9 @@
 | 出貨 | `shipments`, `shipment_items` |
 | 金流 | `payments` |
 | 溝通 | `notifications`, `messages` |
-| 設定 | `fee_configs`, `banners` |
+| 設定 | `fee_configs` |
 
-共 **12 張表、15 個 ENUM**
+共 **11 張表、13 個 ENUM**
 
 ---
 
@@ -96,7 +96,6 @@ CREATE TYPE entity_type AS ENUM ('COMMISSION', 'SHIPMENT', 'PAYMENT', 'MESSAGE')
 
 -- 其他
 CREATE TYPE message_sender_role AS ENUM ('BUYER', 'STAFF');
-CREATE TYPE banner_status       AS ENUM ('ACTIVE', 'INACTIVE', 'SCHEDULED');
 CREATE TYPE fee_config_key      AS ENUM (
   -- 【平台服務費】
   'SERVICE_FEE_RATE',           -- 服務費率（%）例：0.10 = 商品費的 10%
@@ -425,10 +424,6 @@ CREATE TABLE notifications (
   is_read             BOOLEAN            NOT NULL DEFAULT FALSE,
   read_at             TIMESTAMPTZ,
 
-  email_sent          BOOLEAN            NOT NULL DEFAULT FALSE,
-  email_sent_at       TIMESTAMPTZ,
-  email_error         TEXT,
-
   metadata            JSONB              DEFAULT '{}',  -- 前端路由跳轉用
 
   created_at          TIMESTAMPTZ        NOT NULL DEFAULT NOW()
@@ -436,9 +431,9 @@ CREATE TABLE notifications (
 ```
 
 **設計理由：**
-- `email_sent` 直接放通知表：站內信與 email 1:1 對應，不需獨立拆表
 - 多型關聯（`related_entity_type` + `related_entity_id`）：通知可對應不同實體，比多個 nullable FK 乾淨
 - `metadata`：前端用來決定點擊後的跳轉路由，例如 `{"route": "/commissions/xxx"}`
+- Email 發送由 application layer（Spring Boot Event / Queue）負責，不在 DB 追蹤狀態
 
 ---
 
@@ -479,31 +474,6 @@ CREATE TABLE fee_configs (
 **設計理由：**
 - `config_key` 直接當 PK，一個 key 只有一筆，改費率直接 UPDATE
 - 作品集不需要費率歷史版本控制，簡化設計
-
----
-
-### banners
-
-```sql
-CREATE TABLE banners (
-  id               UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  title            VARCHAR(200)  NOT NULL,
-  subtitle         VARCHAR(300),
-  image_url        TEXT          NOT NULL,
-  image_url_mobile TEXT,
-  link_url         TEXT,
-  link_target      VARCHAR(20)   DEFAULT '_self',
-  status           banner_status NOT NULL DEFAULT 'INACTIVE',
-  scheduled_start  TIMESTAMPTZ,
-  scheduled_end    TIMESTAMPTZ,
-  sort_order       SMALLINT      NOT NULL DEFAULT 0,
-  click_count      INT           NOT NULL DEFAULT 0,
-  impression_count INT           NOT NULL DEFAULT 0,
-  created_by       UUID          REFERENCES users(id),
-  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
-);
-```
 
 ---
 
@@ -624,8 +594,6 @@ Spring Boot 實作：
 | **fee_configs** | | | |
 | 查看費率（計算用）| ❌ | ✅ | ✅ |
 | 修改費率 | ❌ | ❌ | ✅ |
-| **banners** | | | |
-| 管理廣告 | ❌ | ❌ | ✅ |
 
 ---
 
@@ -652,5 +620,5 @@ src/main/resources/db/migration/
 ├── V4__shipments.sql
 ├── V5__payments.sql
 ├── V6__notifications_messages.sql
-└── V7__fee_configs_banners_indexes.sql
+└── V7__fee_configs_indexes.sql
 ```
