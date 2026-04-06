@@ -199,9 +199,8 @@ CREATE TABLE commissions (
   status                commission_status  NOT NULL DEFAULT 'PENDING',
   cancel_stage          cancel_stage,
 
-  -- 地址：FK + 快照雙存
-  shipping_address_id       UUID           REFERENCES addresses(id),
-  shipping_address_snapshot JSONB,         -- 確認時寫入，鎖定當下地址
+  -- 地址（FK，地址一旦被委託使用後不允許修改，只能新增或刪除）
+  shipping_address_id   UUID           REFERENCES addresses(id),
 
   shipping_method       shipping_method    NOT NULL DEFAULT 'AIR_STANDARD',
   requires_inspection   BOOLEAN            NOT NULL DEFAULT FALSE,
@@ -219,11 +218,19 @@ CREATE TABLE commissions (
   cancelled_at          TIMESTAMPTZ,
   cancel_requested_by   UUID               REFERENCES users(id),
 
-  -- 費用（JSONB 快照，結構見下方）
-  fee_snapshot          JSONB              NOT NULL DEFAULT '{}',
-  estimated_total_twd   NUMERIC(12,2),    -- 冗餘，方便排序/篩選
-  actual_total_twd      NUMERIC(12,2),
-  jpy_to_twd_rate       NUMERIC(8,4),     -- 確認時匯率快照
+  -- 費用（PREPAY 段，委託確認時寫入）
+  items_cost_jpy        NUMERIC(10,2),    -- 商品費（日圓）
+  items_cost_twd        NUMERIC(10,2),    -- 商品費（台幣）
+  jpy_to_twd_rate       NUMERIC(8,4),     -- 確認時匯率
+  service_fee_twd       NUMERIC(10,2),    -- 服務費
+  inspection_fee_twd    NUMERIC(10,2),    -- 加值服務費小計
+  domestic_shipping_twd NUMERIC(10,2),    -- 日本境內運費
+  prepay_total_twd      NUMERIC(10,2),    -- 預付總額
+
+  -- 費用（FINAL 段，出貨打包後寫入）
+  intl_shipping_twd     NUMERIC(10,2),    -- 實際國際運費
+  customs_twd           NUMERIC(10,2),    -- 關稅估算
+  final_total_twd       NUMERIC(10,2),    -- 尾款總額
 
   -- 各階段時間戳
   submitted_at          TIMESTAMPTZ        NOT NULL DEFAULT NOW(),
@@ -237,38 +244,12 @@ CREATE TABLE commissions (
 );
 ```
 
-#### fee_snapshot 結構（JSONB）
-
-```json
-{
-  "prepay": {
-    "items_cost_jpy": 12500,
-    "items_cost_twd": 2875,
-    "jpy_to_twd_rate": 0.23,
-    "service_fee_twd": 288,
-    "service_fee_rate": 0.10,
-    "value_added_services": [
-      { "type": "INSPECTION_DETAIL", "fee_twd": 100 },
-      { "type": "PHOTO", "fee_twd": 50 }
-    ],
-    "prepay_total_twd": 3313
-  },
-  "final": {
-    "actual_weight_g": 850,
-    "shipping_method": "AIR_STANDARD",
-    "domestic_shipping_jp_twd": 150,
-    "intl_shipping_twd": 920,
-    "customs_estimate_twd": 200,
-    "final_total_twd": 1270
-  }
-}
-```
-
 **設計理由：**
 - 委託單 = 訂單：一張單走完整流程，避免兩表同步問題
-- `shipping_address_snapshot`：地址快照鎖定當下版本，Buyer 之後修改地址不影響歷史
+- `shipping_address_id` 只存 FK：地址一旦被委託使用即不允許修改，用應用層控制
 - `cancel_stage`：取消後 status 變 CANCELLED，需獨立欄位記錄「當時在哪個階段」，決定退款政策
-- `fee_snapshot` 用 JSONB：費率會隨時間改變，快照保留歷史費用；結構不固定（非每筆都有所有項目）
+- 費用拆成獨立欄位：比 JSONB 更直覺，查詢和 debug 更方便
+- 費用分兩段：PREPAY（確認時填）、FINAL（出貨後填），對應兩次付款時機
 - 多個時間戳：每個節點有獨立業務意義（SLA、帳期、倉儲時間計算）
 
 ---
@@ -349,7 +330,7 @@ CREATE TABLE shipments (
 
   buyer_id                   UUID             NOT NULL REFERENCES users(id),
   created_by_staff_id        UUID             NOT NULL REFERENCES users(id),
-  shipping_address_snapshot  JSONB            NOT NULL,
+  shipping_address_id        UUID             NOT NULL REFERENCES addresses(id),
 
   status                     shipment_status  NOT NULL DEFAULT 'PREPARING',
   shipping_method            shipping_method  NOT NULL DEFAULT 'AIR_STANDARD',
@@ -378,7 +359,7 @@ CREATE TABLE shipments (
 **設計理由：**
 - 獨立表：一張出貨單可包含同一 Buyer 多筆委託的商品（合併出貨），無法內嵌在 commission
 - `buyer_id` 限制一個 Buyer：一個包裹只寄給一個人
-- `shipping_address_snapshot`：出貨單建立後地址鎖定，不受後續修改影響
+- `shipping_address_id` 只存 FK：地址一旦進出貨單即不允許修改，用應用層控制
 
 ---
 
