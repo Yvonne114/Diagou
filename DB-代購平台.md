@@ -99,15 +99,26 @@ CREATE TYPE entity_type AS ENUM ('COMMISSION', 'SHIPMENT', 'PAYMENT', 'MESSAGE')
 CREATE TYPE message_sender_role AS ENUM ('BUYER', 'STAFF');
 CREATE TYPE banner_status       AS ENUM ('ACTIVE', 'INACTIVE', 'SCHEDULED');
 CREATE TYPE fee_config_key      AS ENUM (
-  'SERVICE_FEE_RATE',           -- 服務費率（%）
-  'SERVICE_FEE_MIN',            -- 最低服務費（TWD）
-  'INSPECTION_FEE_PER_ITEM',    -- 每件檢品費（TWD）
-  'DOMESTIC_SHIPPING_JP_FLAT',  -- 日本境內運費估算（TWD）
-  'INTL_SHIPPING_RATE_AIR',     -- 空運費率（TWD/kg）
-  'INTL_SHIPPING_RATE_SEA',     -- 海運費率（TWD/kg）
-  'CUSTOMS_ESTIMATE_RATE',      -- 關稅預估率（%）
-  'FREE_INSPECTION_THRESHOLD',  -- 免費檢品門檻（TWD）
-  'CANCEL_FEE_RATE_AFTER_PAID'  -- 付款後取消手續費率（%）
+  -- 【平台服務費】
+  'SERVICE_FEE_RATE',           -- 服務費率（%）例：0.10 = 商品費的 10%
+  'SERVICE_FEE_MIN',            -- 最低服務費（TWD）例：100，10% 算出來不足 100 元就收 100
+
+  -- 【加值服務費】
+  'INSPECTION_FEE_PER_ITEM',    -- 每件檢品費（TWD）例：50，選檢品時每件商品收 50 元
+
+  -- 【運費】
+  'DOMESTIC_SHIPPING_JP_FLAT',  -- 日本境內運費估算（TWD）例：150，商品從日本店家寄到倉庫的平均費用
+  'INTL_SHIPPING_RATE_AIR',     -- 空運費率（TWD/kg）例：200，每公斤空運費用
+  'INTL_SHIPPING_RATE_SEA',     -- 海運費率（TWD/kg）例：80，每公斤海運費用
+
+  -- 【關稅】
+  'CUSTOMS_ESTIMATE_RATE',      -- 關稅預估率（%）例：0.05 = 商品費的 5%（僅供估算，實際依海關裁定）
+
+  -- 【優惠門檻】
+  'FREE_INSPECTION_THRESHOLD',  -- 免費檢品門檻（TWD）例：10000，委託金額超過此值免收檢品費
+
+  -- 【取消手續費】
+  'CANCEL_FEE_RATE_AFTER_PAID'  -- 付款後取消手續費率（%）例：0.05 = 退款金額扣 5% 手續費
 );
 ```
 
@@ -411,8 +422,10 @@ CREATE TABLE payments (
   payment_method         payment_method  NOT NULL,
   status                 payment_status  NOT NULL DEFAULT 'PENDING',
 
-  gateway_transaction_id VARCHAR(200),
-  gateway_response       JSONB,           -- 金流平台原始回傳，備查
+  gateway_transaction_id VARCHAR(200),     -- ECPay 的 TradeNo
+  gateway_response       JSONB,           -- ECPay callback 完整原始資料，備查
+  ecpay_payment_type     VARCHAR(30),     -- ECPay 付款類型：Credit_CreditCard / ATM_BOT / CVS_CVS 等
+  atm_info               JSONB,           -- ATM 虛擬帳號資訊（僅 ATM 付款時有值）
   paid_at                TIMESTAMPTZ,
 
   refund_amount_twd      NUMERIC(12,2),
@@ -434,7 +447,15 @@ CREATE TABLE payments (
 
 **設計理由：**
 - 雙 nullable FK（`commission_id` / `shipment_id`）：PREPAY 對應委託，FINAL 對應出貨單，兩者時機和對象不同
-- `gateway_response` JSONB：保留金流原始回傳，用於客訴、對帳、稽核
+- `gateway_response` JSONB：保留 ECPay callback 完整原始回傳，用於客訴、對帳、稽核
+- `ecpay_payment_type`：記錄 Buyer 選的付款方式（信用卡 / ATM / 超商），`choosePayment` 對應值
+- `atm_info` JSONB：ATM 付款時 ECPay callback 回傳虛擬帳號、銀行代碼、繳費期限，前端需顯示給 Buyer，獨立存比從 `gateway_response` 解析方便
+  ```json
+  { "bank_code": "005", "v_account": "9381234567890", "expire_date": "2026/04/10" }
+  ```
+- `payment_number` 直接當 ECPay 的 `MerchantTradeNo` 使用（格式 PAY-YYYYMMDD-序號，≤20字元符合規範）
+- `gateway_transaction_id` 存 ECPay 回傳的 `TradeNo`
+- `checkMacValue` 和 `formData` 不存 DB，每次付款時重新產生
 - `UNIQUE (commission_id, payment_type)`：防止同一委託的預付被重複建立
 - `confirmed_by_staff_id`：銀行轉帳需人工核帳，記錄操作人供稽核
 
