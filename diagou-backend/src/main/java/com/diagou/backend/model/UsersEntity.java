@@ -3,7 +3,9 @@ package com.diagou.backend.model;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.diagou.backend.model.enums.UserRole;
 import com.diagou.backend.model.enums.UserStatus;
@@ -36,10 +38,12 @@ public class UsersEntity {
     private String displayName;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(nullable = false)
     private UserRole role = UserRole.BUYER;
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(nullable = false)
     private UserStatus status = UserStatus.ACTIVE;
 
