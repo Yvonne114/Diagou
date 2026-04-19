@@ -41,9 +41,11 @@ public class SecurityConfig {
                 // Public endpoints
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/payments/ecpay/callback").permitAll()
+                // .requestMatchers(HttpMethod.POST, "/api/commissions").permitAll()
 
                 // BUYER endpoints
-                .requestMatchers(HttpMethod.POST, "/api/commissions").hasRole("BUYER")
+                .requestMatchers("/api/v1/commissions/**").permitAll() // 測試完記得改回來
+                // .requestMatchers(HttpMethod.POST, "/api/commissions").hasRole("BUYER")
                 .requestMatchers("/api/addresses/**").hasRole("BUYER")
                 .requestMatchers(HttpMethod.GET, "/api/shipments/available-items").hasRole("BUYER")
                 .requestMatchers(HttpMethod.POST, "/api/payments/prepay").hasRole("BUYER")

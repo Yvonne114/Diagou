@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.math.RoundingMode;
 
 @Service
 @RequiredArgsConstructor
@@ -76,7 +77,7 @@ public class CommissionCommandService {
      */
     @Transactional
     public void confirmCommission(UUID commissionId, UUID staffId, BigDecimal rate, BigDecimal itemsJpy) {
-        CommissionCommissionEntity commission = commissionRepository.findById(commissionId)
+        CommissionEntity commission = commissionRepository.findById(commissionId)
                 .orElseThrow(() -> new RuntimeException("委託單不存在"));
 
         // 檢查狀態
@@ -90,7 +91,7 @@ public class CommissionCommandService {
         commission.setItemsCostJpy(itemsJpy);
 
         // 2. 計算商品台幣價格 (Jpy * Rate)
-        BigDecimal itemsTwd = itemsJpy.multiply(rate).setScale(0, BigDecimal.ROUND_HALF_UP);
+        BigDecimal itemsTwd = itemsJpy.multiply(rate).setScale(0, RoundingMode.HALF_UP);
         commission.setItemsCostTwd(itemsTwd);
 
         // 3. 計算預付總額 (商品台幣 + 服務費 + 檢驗費)

@@ -4,6 +4,7 @@ import com.diagou.backend.dto.CommissionRequest;
 import com.diagou.backend.dto.CommissionResponse;
 import com.diagou.backend.model.CommissionEntity;
 import com.diagou.backend.repository.CommissionRepository;
+import com.diagou.backend.service.CommissionCommandService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,17 +21,40 @@ import java.util.stream.Collectors;
 public class CommissionController {
 
     private final CommissionRepository commissionRepository;
+    private final CommissionCommandService commissionCommandService;
+
+    // // 1. Buyer 提交新委託單
+    // @PostMapping
+    // public ResponseEntity<UUID> createCommission(
+    //         @RequestBody CommissionRequest request,
+    //         @AuthenticationPrincipal UserDetails user) {
+    //     UUID buyerId = UUID.fromString(user.getUsername());
+    //     UUID id = commissionCommandService.createCommission(buyerId, request);
+    //     return ResponseEntity.ok(id);
+    // }
 
     // 1. Buyer 提交新委託單
+    //測試用
     @PostMapping
-    public ResponseEntity<UUID> createCommission(@RequestBody CommissionRequest request) {
-        // 這裡通常會呼叫 Service 處理：
-        // 1. 轉換 DTO 為 Entity
-        // 2. 設置初始狀態為 PENDING
-        // 3. 處理關聯的 Items & Services
-        // 4. 存檔並回傳 ID
-        return ResponseEntity.ok(UUID.randomUUID()); // 暫代
+    public ResponseEntity<?> createCommission(
+            @RequestBody CommissionRequest request,
+            @AuthenticationPrincipal UserDetails user) {
+        
+        // 解決 500 NPE 的關鍵：如果沒有登入，給一個測試用的固定 UUID
+        UUID buyerId;
+        if (user != null) {
+            buyerId = UUID.fromString(user.getUsername());
+        } else {
+            // 測試用：發送請求時若沒帶 Token，會預設使用這組 UUID
+            buyerId = UUID.fromString("0e51f4ec-5852-4919-a65a-84e361c591e8");
+        }
+
+        // 請確認你的 Service 方法名是 createCommission 還是 create
+        // 這裡我們統一使用你原本定義的邏輯
+        UUID id = commissionCommandService.createCommission(buyerId, request);
+        return ResponseEntity.ok(id);
     }
+
 
     // 2. 獲取特定委託單詳情 (Buyer/Staff 共用)
     @GetMapping("/{id}")
@@ -66,7 +90,7 @@ public class CommissionController {
                     CommissionResponse.ItemResponse.builder()
                         .productUrl(i.getProductUrl())
                         .productNameJa(i.getProductNameJa())
-                        .quantity(i.getQuantity())
+                        .quantity(i.getQuantity().intValue())
                         .unitPriceActualJpy(i.getUnitPriceActualJpy())
                         .build()
                 ).collect(Collectors.toList()))

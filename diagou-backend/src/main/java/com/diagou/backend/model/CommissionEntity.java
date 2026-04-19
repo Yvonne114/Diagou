@@ -7,6 +7,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import com.diagou.backend.model.enums.CommissionStatus;
+import com.diagou.backend.model.enums.CancelStage;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -37,11 +38,19 @@ public class CommissionEntity {
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private CommissionStatus status;
 
-    @Column(name = "cancel_stage")
-    private String cancelStage; // 建議也定義成 Enum
+    // 如果你還沒定義 CancelStage Enum，請先建立一個
+    // 如果暫時不想建立 Enum，請看下方的「快速繞過法」
 
-    @Column(name = "requires_inspection", nullable = false)
-    private Boolean requiresInspection = false;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_stage", columnDefinition = "cancel_stage")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM) // 這是讓 PostgreSQL 乖乖轉型的關鍵
+    private CancelStage cancelStage;
+
+    // @Column(name = "requires_inspection", nullable = false)
+    // private Boolean requiresInspection = false;
+
+    @Column(nullable = false)
+    private Boolean requiresInspection = false; // 給它一個預設值
 
     @Column(name = "buyer_note", columnDefinition = "TEXT")
     private String buyerNote;
@@ -76,7 +85,7 @@ public class CommissionEntity {
 
     // 階段時間戳
     @CreationTimestamp
-    // private OffsetDateTime submittedAt;
+    private OffsetDateTime submittedAt;
 
     private OffsetDateTime confirmedAt;
     private OffsetDateTime paidAt;
