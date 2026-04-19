@@ -32,7 +32,7 @@ async function handleLogout() {
       </div>
 
       <div class="card-grid">
-        <div class="card commission-card" @click="() => {}">
+        <div class="card commission-card" @click="router.push('/commissionForm')">
           <div class="card-icon">📋</div>
           <div class="card-body">
             <h3>委託單</h3>

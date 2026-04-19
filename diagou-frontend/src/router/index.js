@@ -34,6 +34,12 @@ const router = createRouter({
       component: () => import('@/views/AddressView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/commissionForm',
+      name: 'commissionForm',
+      component: () => import('@/views/CommissionForm.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
