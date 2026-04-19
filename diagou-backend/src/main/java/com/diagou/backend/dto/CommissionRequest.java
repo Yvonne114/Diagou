@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.diagou.backend.model.enums.ValueAddedServiceType;
 
 import java.util.List;
 import java.util.Map;
@@ -17,7 +18,7 @@ public class CommissionRequest {
     private String buyerNote;
     private Boolean requiresInspection;
     private List<ItemRequest> items;
-    private List<String> serviceTypes; // 對應 value_added_service_type 的名稱
+    private List<ValueAddedServiceType> serviceTypes;  
 
     @Data
     @Builder

@@ -7,6 +7,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import com.diagou.backend.model.enums.CommissionServiceStatus;
+import com.diagou.backend.model.enums.ValueAddedServiceType;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -29,8 +30,9 @@ public class CommissionService {
     @JoinColumn(name = "commission_id", nullable = false)
     private CommissionEntity commission;
 
-    @Column(name = "service_type", nullable = false)
-    private String serviceType; // 對應你的 value_added_service_type
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "service_type", nullable = false, columnDefinition = "value_added_service_type")
+    private ValueAddedServiceType serviceType;
 
     @Column(name = "fee_twd", nullable = false)
     private BigDecimal feeTwd;
