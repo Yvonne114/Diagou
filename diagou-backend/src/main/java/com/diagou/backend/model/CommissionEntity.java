@@ -1,0 +1,99 @@
+package com.diagou.backend.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import com.diagou.backend.model.enums.CommissionStatus;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.UUID;
+
+@Entity
+@Table(name = "commissions")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class CommissionEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(name = "buyer_id", nullable = false)
+    private UUID buyerId;
+
+    @Column(name = "assigned_staff_id")
+    private UUID assignedStaffId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "commission_status")
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    private CommissionStatus status;
+
+    @Column(name = "cancel_stage")
+    private String cancelStage; // 建議也定義成 Enum
+
+    @Column(name = "requires_inspection", nullable = false)
+    private Boolean requiresInspection = false;
+
+    @Column(name = "buyer_note", columnDefinition = "TEXT")
+    private String buyerNote;
+
+    @Column(name = "staff_note", columnDefinition = "TEXT")
+    private String staffNote;
+
+    // 拒絕相關
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
+
+    @Column(name = "rejected_at")
+    private OffsetDateTime rejectedAt;
+
+    @Column(name = "rejected_by")
+    private UUID rejectedBy;
+
+    // 取消相關
+    @Column(name = "cancel_reason", columnDefinition = "TEXT")
+    private String cancelReason;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
+    // 費用欄位 (日圓建議用 BigDecimal 確保精準度)
+    private BigDecimal itemsCostJpy;
+    private BigDecimal itemsCostTwd;
+    private BigDecimal jpyToTwdRate;
+    private BigDecimal serviceFeeTwd;
+    private BigDecimal inspectionFeeTwd;
+    private BigDecimal prepayTotalTwd;
+
+    // 階段時間戳
+    @CreationTimestamp
+    // private OffsetDateTime submittedAt;
+
+    private OffsetDateTime confirmedAt;
+    private OffsetDateTime paidAt;
+    private OffsetDateTime purchasingStartedAt;
+    private OffsetDateTime arrivedWarehouseAt;
+    private OffsetDateTime deliveredAt;
+
+    @CreationTimestamp
+    private OffsetDateTime createdAt;
+
+    @UpdateTimestamp
+    private OffsetDateTime updatedAt;
+
+    // 關聯設定
+    @OneToMany(mappedBy = "commission", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<CommissionItem> items;
+
+    @OneToMany(mappedBy = "commission", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<CommissionService> services;
+}
